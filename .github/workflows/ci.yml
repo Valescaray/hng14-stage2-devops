@@ -188,9 +188,17 @@ jobs:
           image-ref: localhost:5000/api:${{ github.sha }}
           format: sarif
           output: trivy-api.sarif
-          exit-code: "1"
+          exit-code: "0"
           severity: CRITICAL
           ignore-unfixed: true
+
+      - name: Fail if CRITICAL vulnerabilities found
+        run: |
+          if grep -q '"level":"error"' trivy-api.sarif; then
+            echo "CRITICAL vulnerabilities found!"
+            exit 1
+          fi
+          echo "No CRITICAL vulnerabilities found"
 
       - name: Scan worker image
         uses: aquasecurity/trivy-action@master

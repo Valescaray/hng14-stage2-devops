@@ -26,12 +26,14 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY app.js ./
 COPY views/ ./views/
 
+# Fix ownership of all files
+RUN chown -R appuser:appgroup /app
+
 # Switch to non-root user
 USER appuser
 
 EXPOSE 3000
 
-# Change this line in your Frontend Dockerfile
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/ || exit 1
 

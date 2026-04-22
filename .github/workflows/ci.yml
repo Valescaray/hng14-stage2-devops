@@ -173,6 +173,15 @@ jobs:
             localhost:5000/frontend:${{ github.sha }}
             localhost:5000/frontend:latest
 
+      - name: Debug - show CRITICAL vulnerabilities
+        run: |
+          docker run --rm \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          aquasec/trivy:latest image \
+          --severity CRITICAL \
+          --exit-code 0 \
+          localhost:5000/api:${{ github.sha }}
+
       - name: Scan API image
         uses: aquasecurity/trivy-action@master
         with:

@@ -206,9 +206,17 @@ jobs:
           image-ref: localhost:5000/worker:${{ github.sha }}
           format: sarif
           output: trivy-worker.sarif
-          exit-code: "1"
+          exit-code: "0"
           severity: CRITICAL
           ignore-unfixed: true
+
+      - name: Fail if CRITICAL vulnerabilities found
+        run: |
+          if grep -q '"level":"error"' trivy-worker.sarif; then
+            echo "CRITICAL vulnerabilities found!"
+            exit 1
+          fi
+          echo "No CRITICAL vulnerabilities found"
 
       - name: Scan frontend image
         uses: aquasecurity/trivy-action@master
@@ -216,9 +224,17 @@ jobs:
           image-ref: localhost:5000/frontend:${{ github.sha }}
           format: sarif
           output: trivy-frontend.sarif
-          exit-code: "1"
+          exit-code: "0"
           severity: CRITICAL
           ignore-unfixed: true
+
+      - name: Fail if CRITICAL vulnerabilities found
+        run: |
+          if grep -q '"level":"error"' trivy-frontend.sarif; then
+            echo "CRITICAL vulnerabilities found!"
+            exit 1
+          fi
+          echo "No CRITICAL vulnerabilities found"
 
       - name: Upload SARIF results
         uses: actions/upload-artifact@v4

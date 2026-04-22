@@ -173,15 +173,6 @@ jobs:
             localhost:5000/frontend:${{ github.sha }}
             localhost:5000/frontend:latest
 
-      - name: Debug - show CRITICAL vulnerabilities
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: localhost:5000/api:${{ github.sha }}
-          format: table
-          exit-code: "0"
-          severity: CRITICAL
-          ignore-unfixed: true
-
       - name: Scan API image
         uses: aquasecurity/trivy-action@master
         with:
@@ -264,23 +255,45 @@ jobs:
       - name: Start full stack
         run: docker compose up -d --build
 
-      - name: Wait for services to be healthy
+      - name: Wait for ALL services to be healthy
         run: |
           timeout 120 bash -c \
-            'until docker compose ps | grep -q "healthy"; do sleep 5; done'
+          'until [ $(docker compose ps --filter "health=healthy" --quiet | wc -l) -eq 4 ]; do 
+            echo "Waiting for services to be healthy..."
+            sleep 5
+          done'
+
+      - name: Check frontend routes
+        run: |
+          curl -v http://localhost:3000/
+          curl -v -X POST http://localhost:3000/submit
+          curl -v -X POST http://localhost:3000/jobs
 
       - name: Submit a job and poll for completion
         run: |
-          JOB_ID=$(curl -s -X POST http://localhost:3000/submit \
-            -H "Content-Type: application/json" \
-            -d '{"task": "test-job"}' | jq -r '.job_id')
+          # 1. Submit
+          echo "Submitting job..."
 
+          # Submit job
+          RESPONSE=$(curl -s -X POST http://localhost:3000/submit \
+          -H "Content-Type: application/json" \
+          -d '{}')
+
+          echo "Response: $RESPONSE"
+
+          JOB_ID=$(echo $RESPONSE | jq -r '.job_id')
           echo "Submitted job: $JOB_ID"
 
+          if [ -z "$JOB_ID" ] || [ "$JOB_ID" = "null" ]; then
+             echo "Failed to get job ID"
+             exit 1
+          fi
+
+          # Poll for completion
           for i in $(seq 1 20); do
-            STATUS=$(curl -s http://localhost:3000/jobs/$JOB_ID | jq -r '.status')
-            echo "Status: $STATUS"
-            if [ "$STATUS" = "completed" ]; then
+             STATUS=$(curl -s http://localhost:3000/status/$JOB_ID | jq -r '.status')
+             echo "Status: $STATUS"
+             if [ "$STATUS" = "completed" ]; then
               echo "Job completed successfully"
               exit 0
             fi

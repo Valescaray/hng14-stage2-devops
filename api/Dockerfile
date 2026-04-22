@@ -1,7 +1,7 @@
 # ============================================================
 # Stage 1 — Build: install Python dependencies into a venv
 # ============================================================
-FROM python:3.12-slim AS build
+FROM python:3.12-slim-bookworm AS build
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir \
 # ============================================================
 # Stage 2 — Production: slim runtime image
 # ============================================================
-FROM python:3.12-slim AS production
+FROM python:3.12-slim-bookworm AS production
 
 # Security — run as non-root
 RUN groupadd -r appgroup && useradd -r -g appgroup -d /app -s /sbin/nologin appuser

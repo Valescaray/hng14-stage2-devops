@@ -1,7 +1,7 @@
 # ============================================================
 # Worker — Python Redis consumer
 # ============================================================
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 # Security — run as non-root
 RUN groupadd -r appgroup && useradd -r -g appgroup -d /app -s /sbin/nologin appuser

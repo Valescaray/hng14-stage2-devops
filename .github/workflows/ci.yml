@@ -330,19 +330,16 @@ jobs:
           APP_ENV=production
           EOF
 
-      - name: Pull latest images
-        run: |
-          docker pull localhost:5000/api:${{ github.sha }}
-          docker pull localhost:5000/worker:${{ github.sha }}
-          docker pull localhost:5000/frontend:${{ github.sha }}
-
       - name: Rolling update
         run: |
+          # Save old container ID
           OLD_CONTAINER=$(docker compose ps -q api)
           echo "Old container: $OLD_CONTAINER"
 
+          # Build and start new api container
           docker compose up -d --no-deps --build api
 
+          # Wait up to 60 seconds for health check
           SECONDS=0
           while true; do
             NEW_CONTAINER=$(docker compose ps -q api)
@@ -358,7 +355,7 @@ jobs:
                 docker rm $OLD_CONTAINER
               fi
 
-              docker compose up -d --no-deps worker frontend
+              docker compose up -d --no-deps --build worker frontend
               echo "Rolling update complete"
               exit 0
             fi
@@ -366,7 +363,6 @@ jobs:
             if [ $SECONDS -ge 60 ]; then
               echo "Health check failed after 60s — aborting"
               echo "Old container $OLD_CONTAINER remains running"
-
               docker compose stop api
               docker start $OLD_CONTAINER
               exit 1

@@ -1,0 +1,287 @@
+name: CI pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install flake8
+        run: pip install flake8
+
+      - name: Lint Python (api)
+        run: flake8 api/ --max-line-length=88
+
+      - name: Lint Python (worker)
+        run: flake8 worker/ --max-line-length=88
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install and run eslint (frontend)
+        run: |
+          cd frontend || exit 0
+          if [ -f package.json ]; then
+            npm ci
+            npx eslint . || true
+          fi
+
+      - name: Lint Dockerfiles with hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: api/Dockerfile
+
+      - name: Lint worker Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: worker/Dockerfile
+
+      - name: Lint frontend Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: frontend/Dockerfile
+
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r api/requirements.txt pytest pytest-cov
+
+      - name: Run tests with coverage
+        run: |
+          cd api
+          pytest tests/ \
+            --cov=. \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:coverage-html
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: api/coverage-html/
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api
+          push: true
+          tags: |
+            localhost:5000/api:${{ github.sha }}
+            localhost:5000/api:latest
+
+      - name: Build and push worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./worker
+          push: true
+          tags: |
+            localhost:5000/worker:${{ github.sha }}
+            localhost:5000/worker:latest
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            localhost:5000/frontend:${{ github.sha }}
+            localhost:5000/frontend:latest
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+
+    steps:
+      - name: Scan API image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: localhost:5000/api:${{ github.sha }}
+          format: sarif
+          output: trivy-api.sarif
+          exit-code: 1
+          severity: CRITICAL
+
+      - name: Scan worker image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: localhost:5000/worker:${{ github.sha }}
+          format: sarif
+          output: trivy-worker.sarif
+          exit-code: 1
+          severity: CRITICAL
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: localhost:5000/frontend:${{ github.sha }}
+          format: sarif
+          output: trivy-frontend.sarif
+          exit-code: 1
+          severity: CRITICAL
+
+      - name: Upload SARIF results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-results
+          path: "*.sarif"
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: security-scan
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .env file
+        run: |
+          cat > .env << EOF
+          REDIS_HOST=redis
+          REDIS_PORT=6379
+          REDIS_PASSWORD=testpassword
+          API_URL=http://api:8000
+          FRONTEND_PORT=3000
+          APP_ENV=test
+          EOF
+
+      - name: Start full stack
+        run: docker compose up -d --build
+
+      - name: Wait for services to be healthy
+        run: |
+          timeout 120 bash -c \
+            'until docker compose ps | grep -q "healthy"; do sleep 5; done'
+
+      - name: Submit a job and poll for completion
+        run: |
+          JOB_ID=$(curl -s -X POST http://localhost:3000/jobs \
+            -H "Content-Type: application/json" \
+            -d '{"task": "test-job"}' | jq -r '.job_id')
+
+          echo "Submitted job: $JOB_ID"
+
+          for i in $(seq 1 20); do
+            STATUS=$(curl -s http://localhost:3000/jobs/$JOB_ID | jq -r '.status')
+            echo "Status: $STATUS"
+            if [ "$STATUS" = "completed" ]; then
+              echo "Job completed successfully"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Job did not complete in time"
+          exit 1
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: integration-test
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .env file
+        run: |
+          cat > .env << EOF
+          REDIS_HOST=redis
+          REDIS_PORT=6379
+          REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+          API_URL=http://api:8000
+          FRONTEND_PORT=3000
+          APP_ENV=production
+          EOF
+
+      - name: Pull latest images
+        run: |
+          docker pull localhost:5000/api:${{ github.sha }}
+          docker pull localhost:5000/worker:${{ github.sha }}
+          docker pull localhost:5000/frontend:${{ github.sha }}
+
+      - name: Rolling update
+        run: |
+          OLD_CONTAINER=$(docker compose ps -q api)
+          echo "Old container: $OLD_CONTAINER"
+
+          docker compose up -d --no-deps --build api
+
+          SECONDS=0
+          while true; do
+            NEW_CONTAINER=$(docker compose ps -q api)
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' \
+              $NEW_CONTAINER)
+
+            if [ "$STATUS" = "healthy" ]; then
+              echo "New container is healthy"
+
+              if [ -n "$OLD_CONTAINER" ]; then
+                echo "Stopping old container: $OLD_CONTAINER"
+                docker stop $OLD_CONTAINER
+                docker rm $OLD_CONTAINER
+              fi
+
+              docker compose up -d --no-deps worker frontend
+              echo "Rolling update complete"
+              exit 0
+            fi
+
+            if [ $SECONDS -ge 60 ]; then
+              echo "Health check failed after 60s — aborting"
+              echo "Old container $OLD_CONTAINER remains running"
+
+              docker compose stop api
+              docker start $OLD_CONTAINER
+              exit 1
+            fi
+
+            echo "Waiting for health check... (${SECONDS}s)"
+            sleep 5
+            SECONDS=$((SECONDS+5))
+          done

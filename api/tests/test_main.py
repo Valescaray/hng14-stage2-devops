@@ -6,11 +6,7 @@ from main import app
 # Ensure the `api` package path is importable when pytest's root differs.
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-
-
-
 client = TestClient(app)
-
 
 def test_create_job():
     with patch("main.r") as mock_redis:
@@ -24,7 +20,6 @@ def test_create_job():
         mock_redis.lpush.assert_called()
         mock_redis.hset.assert_called()
 
-
 def test_get_job_status():
     with patch("main.r") as mock_redis:
         mock_redis.hget = MagicMock(return_value="queued")
@@ -34,7 +29,6 @@ def test_get_job_status():
         body = resp.json()
         assert body["job_id"] == "test-job-id"
         assert body["status"] == "queued"
-
 
 def test_invalid_job_id_returns_404():
     with patch("main.r") as mock_redis:

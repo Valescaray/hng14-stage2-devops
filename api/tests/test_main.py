@@ -2,11 +2,11 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
-
+from main import app
 # Ensure the `api` package path is importable when pytest's root differs.
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from main import app
+
 
 
 client = TestClient(app)

@@ -271,7 +271,7 @@ jobs:
 
       - name: Submit a job and poll for completion
         run: |
-          JOB_ID=$(curl -s -X POST http://localhost:3000/jobs \
+          JOB_ID=$(curl -s -X POST http://localhost:3000/submit \
             -H "Content-Type: application/json" \
             -d '{"task": "test-job"}' | jq -r '.job_id')
 

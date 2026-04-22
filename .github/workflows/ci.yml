@@ -139,13 +139,47 @@ jobs:
           - 5000:5000
 
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api
+          push: true
+          tags: |
+            localhost:5000/api:${{ github.sha }}
+            localhost:5000/api:latest
+
+      - name: Build and push worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./worker
+          push: true
+          tags: |
+            localhost:5000/worker:${{ github.sha }}
+            localhost:5000/worker:latest
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            localhost:5000/frontend:${{ github.sha }}
+            localhost:5000/frontend:latest
+
       - name: Scan API image
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: localhost:5000/api:${{ github.sha }}
           format: sarif
           output: trivy-api.sarif
-          exit-code: 1
+          exit-code: "1"
           severity: CRITICAL
 
       - name: Scan worker image
@@ -154,7 +188,7 @@ jobs:
           image-ref: localhost:5000/worker:${{ github.sha }}
           format: sarif
           output: trivy-worker.sarif
-          exit-code: 1
+          exit-code: "1"
           severity: CRITICAL
 
       - name: Scan frontend image
@@ -163,7 +197,7 @@ jobs:
           image-ref: localhost:5000/frontend:${{ github.sha }}
           format: sarif
           output: trivy-frontend.sarif
-          exit-code: 1
+          exit-code: "1"
           severity: CRITICAL
 
       - name: Upload SARIF results
